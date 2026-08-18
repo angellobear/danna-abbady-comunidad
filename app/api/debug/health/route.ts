@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { isAxiosError } from 'axios';
-import { circleRequest, communityId } from '@/lib/circle/_client';
+import { circleRequest, communityId, isCircleStatus } from '@/lib/circle/_client';
 import { adminClient } from '@/lib/supabase';
 import { Resend } from 'resend';
 
@@ -15,13 +15,16 @@ async function checkCircle() {
     await circleRequest('GET', path);
     return { ok: true, config: { url, communityId: cid } };
   } catch (err: unknown) {
+    // 404 = email no encontrado → API alcanzable y credenciales válidas
+    if (isCircleStatus(err, 404)) return { ok: true, config: { url, communityId: cid } };
     if (isAxiosError(err)) {
       return {
         ok: false,
         config: { url, communityId: cid, apiKeySet: !!process.env.CIRCLE_API_KEY },
         httpStatus: err.response?.status ?? null,
-        // Si la respuesta es HTML (página de error), solo mostramos el status
-        circleError: typeof err.response?.data === 'string' ? `HTML error page (status ${err.response.status})` : (err.response?.data ?? null),
+        circleError: typeof err.response?.data === 'string'
+          ? `HTML error page (status ${err.response.status})`
+          : (err.response?.data ?? null),
         message: err.message,
       };
     }
