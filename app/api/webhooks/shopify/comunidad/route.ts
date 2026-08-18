@@ -56,6 +56,7 @@ export async function POST(req: NextRequest) {
 
   // ── 4. Dedup ──────────────────────────────────────────────────────
   if (await isDuplicateAttempt(orderId)) {
+    console.log('[webhook] duplicate attempt, skipping', { orderId });
     return NextResponse.json({ ok: true, duplicate: true });
   }
 
@@ -66,11 +67,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, skipped: 'no_email' });
   }
   const isSubscription = requiredProductId ? true : isSubscriptionOrder(order);
-  if (!isSubscription) return NextResponse.json({ ok: true, skipped: 'not_subscription' });
+  if (!isSubscription) {
+    console.log('[webhook] skipped — not a subscription order', { orderId });
+    return NextResponse.json({ ok: true, skipped: 'not_subscription' });
+  }
 
   const name = extractBuyerName(order);
   const paidAt = new Date();
   const periodEnd = new Date(paidAt.getTime() + membershipDurationMs());
+  console.log('[webhook] processing order', { orderId, email, name, periodEnd });
 
   // ── 6. Registrar intento ──────────────────────────────────────────
   await createAttempt(orderId);
@@ -80,10 +85,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false }, { status: 500 });
   };
 
-  // ── 7. Circle: crear miembro (Circle envía invite si es nuevo) ────
+  // ── 7. Circle: crear miembro ──────────────────────────────────────
   let circleMember: { id: number };
   try {
     circleMember = await findOrCreateMember(email, name ?? undefined);
+    console.log('[webhook] circle member ready', { orderId, circleMemberId: circleMember.id });
   } catch (err) {
     console.error({ event: 'shopify.circle_member_failed', orderId, error: serr(err) });
     return fail('circle_member');
@@ -92,6 +98,7 @@ export async function POST(req: NextRequest) {
   // ── 8. Circle: agregar al grupo de suscripción ───────────────────
   try {
     await addToSubscriptionGroup(email);
+    console.log('[webhook] added to subscription group', { orderId });
   } catch (err) {
     console.error({ event: 'shopify.circle_group_failed', orderId, error: serr(err) });
     return fail('circle_group');
@@ -107,13 +114,14 @@ export async function POST(req: NextRequest) {
       paidAt,
       periodEnd,
     });
+    console.log('[webhook] db upsert ok', { orderId });
   } catch (err) {
     console.error({ event: 'shopify.db_failed', orderId, error: serr(err) });
     return fail('db_upsert');
   }
 
   await markAttemptCompleted(orderId);
-  console.info({ event: 'shopify.processed', orderId, email, circleMemberId: circleMember.id });
+  console.log({ event: 'shopify.processed', orderId, email, circleMemberId: circleMember.id });
 
   // ── 10. Premium (non-blocking) ───────────────────────────────────
   if (process.env.CIRCLE_PREMIUM_GROUP_ID) {
