@@ -12,8 +12,7 @@ export async function GET(req: NextRequest) {
 
   const expire = await runExpireMemberships();
 
-  const hourUtc = new Date().getUTCHours();
-  const tiers = hourUtc === 15 ? await runSyncTiers() : { skipped: true }; // 15 UTC = 9am México (CST)
+  const tiers = await runSyncTiers();
 
   return NextResponse.json({ expire, tiers });
 }
