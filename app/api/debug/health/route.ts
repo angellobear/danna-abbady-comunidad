@@ -7,10 +7,7 @@ const disabled = () =>
 
 async function checkCircle() {
   try {
-    const data = await circleRequest<{ id: number; name: string }>({
-      method: 'GET',
-      path: `/communities/${communityId()}`,
-    });
+    const data = await circleRequest<{ id: number; name: string }>('GET', `/communities/${communityId()}`);
     return { ok: true, community: { id: data.id, name: data.name } };
   } catch (err: unknown) {
     return { ok: false, error: String(err) };
