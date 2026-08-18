@@ -12,6 +12,8 @@ import { upsertMemberPayment, getMemberStreak } from '@/lib/db/members';
 import { isDuplicateAttempt, createAttempt, markAttemptCompleted, markAttemptFailed } from '@/lib/db/webhook-attempts';
 import { membershipDurationMs, premiumStreakThreshold } from '@/lib/config';
 
+const serr = (e: unknown) => (e instanceof Error ? e.message : JSON.stringify(e));
+
 export async function GET() {
   return NextResponse.json({ ok: true });
 }
@@ -83,7 +85,7 @@ export async function POST(req: NextRequest) {
   try {
     circleMember = await findOrCreateMember(email, name ?? undefined);
   } catch (err) {
-    console.error({ event: 'shopify.circle_member_failed', orderId, error: String(err) });
+    console.error({ event: 'shopify.circle_member_failed', orderId, error: serr(err) });
     return fail('circle_member');
   }
 
@@ -91,7 +93,7 @@ export async function POST(req: NextRequest) {
   try {
     await addToSubscriptionGroup(email);
   } catch (err) {
-    console.error({ event: 'shopify.circle_group_failed', orderId, error: String(err) });
+    console.error({ event: 'shopify.circle_group_failed', orderId, error: serr(err) });
     return fail('circle_group');
   }
 
@@ -106,7 +108,7 @@ export async function POST(req: NextRequest) {
       periodEnd,
     });
   } catch (err) {
-    console.error({ event: 'shopify.db_failed', orderId, error: String(err) });
+    console.error({ event: 'shopify.db_failed', orderId, error: serr(err) });
     return fail('db_upsert');
   }
 
