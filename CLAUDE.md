@@ -36,7 +36,7 @@ lib/
 ```
 GET  /                               # health check → { ok: true }
 GET  /api/cron/expire-memberships    # hourly: desactiva miembros expirados + los quita de Circle
-GET  /api/cron/sync-premium          # daily: sincroniza grupo premium según racha
+GET  /api/cron/sync-tiers            # daily: sincroniza grupos de acceso según racha (3m hoy; 6m/12m futuro)
 POST /api/webhooks/shopify/comunidad # pago Shopify → Circle + Supabase
 ```
 

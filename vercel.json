@@ -1,6 +1,5 @@
 {
   "crons": [
-    { "path": "/api/cron/expire-memberships", "schedule": "0 * * * *" },
-    { "path": "/api/cron/sync-premium", "schedule": "0 9 * * *" }
+    { "path": "/api/cron/run", "schedule": "0 * * * *" }
   ]
 }
