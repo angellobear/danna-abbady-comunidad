@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { isAxiosError } from 'axios';
 import { circleRequest, communityId } from '@/lib/circle/_client';
+import { adminClient } from '@/lib/supabase';
 import { Resend } from 'resend';
 
 const disabled = () =>
@@ -40,11 +41,29 @@ async function checkEmail() {
   }
 }
 
+async function checkSupabase() {
+  try {
+    // Verifica que la tabla members existe y la RPC upsert_member_payment está disponible
+    const { error: tableErr } = await adminClient().from('members').select('id').limit(1);
+    if (tableErr) return { ok: false, step: 'members_table', error: tableErr.message, code: tableErr.code };
+
+    const { error: rpcErr } = await adminClient().rpc('get_member_streak', { p_email: '__health_check__' });
+    // PGRST202 = función no existe; cualquier otro error significa que sí existe
+    if (rpcErr && rpcErr.code === 'PGRST202') {
+      return { ok: false, step: 'get_member_streak_rpc', error: 'RPC not found — run migrations', code: rpcErr.code };
+    }
+
+    return { ok: true };
+  } catch (err: unknown) {
+    return { ok: false, error: String(err) };
+  }
+}
+
 export async function GET() {
   if (process.env.DEBUG_HEALTH !== 'true') return disabled();
 
-  const [circle, email] = await Promise.all([checkCircle(), checkEmail()]);
+  const [circle, email, supabase] = await Promise.all([checkCircle(), checkEmail(), checkSupabase()]);
 
-  const status = circle.ok && email.ok ? 200 : 207;
-  return NextResponse.json({ circle, email }, { status });
+  const status = circle.ok && email.ok && supabase.ok ? 200 : 207;
+  return NextResponse.json({ circle, email, supabase }, { status });
 }
