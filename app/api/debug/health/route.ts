@@ -8,17 +8,19 @@ const disabled = () =>
 
 async function checkCircle() {
   const cid = communityId();
-  const url = `https://app.circle.so/api/admin/v2/communities/${cid}`;
+  const path = `/community_members/search?community_id=${cid}&per_page=1`;
+  const url = `https://app.circle.so/api/admin/v2${path}`;
   try {
-    const data = await circleRequest<{ id: number; name: string }>('GET', `/communities/${cid}`);
-    return { ok: true, community: { id: data.id, name: data.name } };
+    await circleRequest('GET', path);
+    return { ok: true, config: { url, communityId: cid } };
   } catch (err: unknown) {
     if (isAxiosError(err)) {
       return {
         ok: false,
         config: { url, communityId: cid, apiKeySet: !!process.env.CIRCLE_API_KEY },
         httpStatus: err.response?.status ?? null,
-        circleError: err.response?.data ?? null,
+        // Si la respuesta es HTML (página de error), solo mostramos el status
+        circleError: typeof err.response?.data === 'string' ? `HTML error page (status ${err.response.status})` : (err.response?.data ?? null),
         message: err.message,
       };
     }
