@@ -9,7 +9,7 @@ const disabled = () =>
 
 async function checkCircle() {
   const cid = communityId();
-  const path = `/community_members/search?community_id=${cid}&per_page=1`;
+  const path = `/community_members/search?community_id=${cid}&email=health%40check.local&per_page=1`;
   const url = `https://app.circle.so/api/admin/v2${path}`;
   try {
     await circleRequest('GET', path);
@@ -44,7 +44,7 @@ async function checkEmail() {
 async function checkSupabase() {
   try {
     // Verifica que la tabla members existe y la RPC upsert_member_payment está disponible
-    const { error: tableErr } = await adminClient().from('members').select('id').limit(1);
+    const { error: tableErr } = await adminClient().from('members').select('email').limit(1);
     if (tableErr) return { ok: false, step: 'members_table', error: tableErr.message, code: tableErr.code };
 
     const { error: rpcErr } = await adminClient().rpc('get_member_streak', { p_email: '__health_check__' });
