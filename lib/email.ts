@@ -1,7 +1,7 @@
 import { Resend } from 'resend';
 
 const CIRCLE_LOGIN = 'https://login.circle.so/sign_in?request_host=bendecidas.circle.so';
-const FROM = 'Danna Abbady <hola@dannaabbady.com>';
+const FROM = process.env.RESEND_FROM ?? 'Danna Abbady <hola@manifestadorapersonal.com>';
 
 function subscriptionHtml(name: string, periodEnd: Date) {
   const date = periodEnd.toLocaleDateString('es-MX', {
