@@ -6,6 +6,7 @@ export const shopifySubscriptionSchema = z.object({
   contact_email: z.string().email().nullable().optional(),
   customer: z
     .object({
+      id: z.union([z.number(), z.string()]).transform(String).nullable().optional(),
       email: z.string().email().nullable().optional(),
       first_name: z.string().nullable().optional(),
       last_name: z.string().nullable().optional(),
@@ -38,3 +39,12 @@ export const extractBuyerName = (o: ShopifySubscriptionPayload) => {
 /** True si algún line_item tiene selling_plan_id (= suscripción). */
 export const isSubscriptionOrder = (o: ShopifySubscriptionPayload) =>
   o.line_items.some((li) => li.selling_plan_id != null);
+
+export const extractShopifyCustomerId = (o: ShopifySubscriptionPayload) =>
+  o.customer?.id ?? null;
+
+/** selling_plan_id del primer line_item que lo tenga (identifica el plan de suscripción). */
+export const extractSellingPlanId = (o: ShopifySubscriptionPayload): string | null => {
+  const id = o.line_items.find((li) => li.selling_plan_id != null)?.selling_plan_id;
+  return id != null ? String(id) : null;
+};

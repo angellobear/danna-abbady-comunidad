@@ -6,11 +6,15 @@ import {
   shopifySubscriptionSchema,
   extractBuyerEmail,
   extractBuyerName,
+  extractShopifyCustomerId,
+  extractSellingPlanId,
   isSubscriptionOrder,
 } from '@/lib/schemas/shopify-subscription';
-import { upsertMemberPayment, getMemberStreak } from '@/lib/db/members';
+import { upsertMemberPayment, getMemberStreak, logWebhookPayload, saveSubscriptionContractId } from '@/lib/db/members';
+import { findSubscriptionContractId } from '@/lib/shopify';
 import { isDuplicateAttempt, createAttempt, markAttemptCompleted, markAttemptFailed } from '@/lib/db/webhook-attempts';
 import { membershipDurationMs, premiumStreakThreshold } from '@/lib/config';
+import { sendSubscriptionConfirmation } from '@/lib/email';
 
 const serr = (e: unknown) => (e instanceof Error ? e.message : JSON.stringify(e));
 
@@ -48,6 +52,9 @@ export async function POST(req: NextRequest) {
   const order = parsed.data;
   const orderId = String(order.id);
 
+  // Log raw payload (non-blocking — best-effort audit trail)
+  logWebhookPayload(orderId, raw).catch(() => {});
+
   // ── 3. Filtro por product_id ──────────────────────────────────────
   const requiredProductId = process.env.SHOPIFY_SUBSCRIPTION_PRODUCT_ID;
   if (requiredProductId && !order.line_items.some((li) => String(li.product_id) === requiredProductId)) {
@@ -73,9 +80,11 @@ export async function POST(req: NextRequest) {
   }
 
   const name = extractBuyerName(order);
+  const shopifyCustomerId = extractShopifyCustomerId(order);
+  const shopifySellingPlanId = extractSellingPlanId(order);
   const paidAt = new Date();
   const periodEnd = new Date(paidAt.getTime() + membershipDurationMs());
-  console.log('[webhook] processing order', { orderId, email, name, periodEnd });
+  console.log('[webhook] processing order', { orderId, email, name, shopifyCustomerId, periodEnd });
 
   // ── 6. Registrar intento ──────────────────────────────────────────
   await createAttempt(orderId);
@@ -113,6 +122,8 @@ export async function POST(req: NextRequest) {
       orderId,
       paidAt,
       periodEnd,
+      shopifyCustomerId,
+      shopifySellingPlanId,
     });
     console.log('[webhook] db upsert ok', { orderId });
   } catch (err) {
@@ -123,7 +134,21 @@ export async function POST(req: NextRequest) {
   await markAttemptCompleted(orderId);
   console.log({ event: 'shopify.processed', orderId, email, circleMemberId: circleMember.id });
 
-  // ── 10. Premium (non-blocking) ───────────────────────────────────
+  // ── 10. Non-blocking: email + subscription contract + premium ───
+  sendSubscriptionConfirmation(email, name ?? null, periodEnd).catch((err) =>
+    console.error({ event: 'shopify.email_failed', orderId, error: serr(err) }),
+  );
+
+  if (shopifyCustomerId) {
+    findSubscriptionContractId(shopifyCustomerId)
+      .then((contractId) => {
+        if (contractId) return saveSubscriptionContractId(orderId, contractId);
+      })
+      .catch((err) =>
+        console.error({ event: 'shopify.contract_lookup_failed', orderId, error: serr(err) }),
+      );
+  }
+
   if (process.env.CIRCLE_PREMIUM_GROUP_ID) {
     getMemberStreak(email).then((streak) => {
       if (streak >= premiumStreakThreshold()) addToPremiumGroup(email).catch(console.error);

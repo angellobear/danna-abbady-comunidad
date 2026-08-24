@@ -52,14 +52,33 @@ export async function upsertMemberPayment(params: {
   orderId: string;
   paidAt: Date;
   periodEnd: Date;
+  shopifyCustomerId?: string | null;
+  shopifySellingPlanId?: string | null;
 }): Promise<void> {
   const { error } = await adminClient().rpc('upsert_member_payment', {
-    p_email:      params.email,
-    p_name:       params.name,
-    p_circle_id:  params.circleId,
-    p_order_id:   params.orderId,
-    p_paid_at:    params.paidAt.toISOString(),
-    p_period_end: params.periodEnd.toISOString(),
+    p_email:                  params.email,
+    p_name:                   params.name,
+    p_circle_id:              params.circleId,
+    p_order_id:               params.orderId,
+    p_paid_at:                params.paidAt.toISOString(),
+    p_period_end:             params.periodEnd.toISOString(),
+    p_shopify_customer_id:    params.shopifyCustomerId ?? null,
+    p_shopify_selling_plan:   params.shopifySellingPlanId ?? null,
   });
+  if (error) throw error;
+}
+
+export async function logWebhookPayload(orderId: string, payload: unknown): Promise<void> {
+  await adminClient().from('shopify_webhook_logs').insert({ shopify_order_id: orderId, payload });
+}
+
+export async function saveSubscriptionContractId(
+  orderId: string,
+  contractId: string,
+): Promise<void> {
+  const { error } = await adminClient()
+    .from('subscription_payments')
+    .update({ shopify_subscription_contract_id: contractId })
+    .eq('shopify_order_id', orderId);
   if (error) throw error;
 }
