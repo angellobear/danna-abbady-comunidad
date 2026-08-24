@@ -1,0 +1,46 @@
+-- Fix: expires_at now accumulates correctly.
+-- Before: GREATEST(current, new_end) → same date if both payments happen same day.
+-- After:  GREATEST(current, now()) + duration → days stack from the later of today or current expiry.
+CREATE OR REPLACE FUNCTION upsert_member_payment(
+  p_email                 TEXT,
+  p_name                  TEXT,
+  p_circle_id             INTEGER,
+  p_order_id              TEXT,
+  p_paid_at               TIMESTAMPTZ,
+  p_period_end            TIMESTAMPTZ,
+  p_shopify_customer_id   TEXT DEFAULT NULL,
+  p_shopify_selling_plan  TEXT DEFAULT NULL
+)
+RETURNS void
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_duration INTERVAL := p_period_end - p_paid_at;
+  v_new_expires TIMESTAMPTZ;
+BEGIN
+  PERFORM pg_advisory_xact_lock(hashtext(p_email));
+
+  -- Stack days: start from whichever is later — current expiry or right now
+  SELECT GREATEST(expires_at, now()) + v_duration
+  INTO v_new_expires
+  FROM members
+  WHERE email = p_email;
+
+  -- If no existing member, just use p_period_end
+  v_new_expires := COALESCE(v_new_expires, p_period_end);
+
+  INSERT INTO members (email, name, circle_member_id, status, expires_at, shopify_customer_id)
+  VALUES (p_email, p_name, p_circle_id, 'active', v_new_expires, p_shopify_customer_id)
+  ON CONFLICT (email) DO UPDATE SET
+    name                 = COALESCE(EXCLUDED.name, members.name),
+    circle_member_id     = COALESCE(EXCLUDED.circle_member_id, members.circle_member_id),
+    shopify_customer_id  = COALESCE(EXCLUDED.shopify_customer_id, members.shopify_customer_id),
+    status               = 'active',
+    expires_at           = v_new_expires;
+
+  -- period_end stores the individual payment's coverage (used by streak), NOT the accumulated value
+  INSERT INTO subscription_payments (shopify_order_id, member_email, paid_at, period_end, shopify_selling_plan_id)
+  VALUES (p_order_id, p_email, p_paid_at, p_period_end, p_shopify_selling_plan)
+  ON CONFLICT (shopify_order_id) DO NOTHING;
+END;
+$$;

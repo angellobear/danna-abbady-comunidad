@@ -31,7 +31,7 @@ function subscriptionHtml(name: string, periodEnd: Date) {
   <div class="header"><h1>Comunidad Bendecidas</h1></div>
   <div class="body">
     <p>¡Hola, ${escHtml(firstName)}! 🌸</p>
-    <p>Tu membresía en la <strong>Comunidad Bendecidas</strong> ha sido activada (o renovada) con éxito. Gracias por seguir siendo parte de este espacio tan especial.</p>
+    <p>Tu membresía en la <strong>Comunidad Bendecidas</strong> está activa. Gracias por ser parte de este espacio tan especial.</p>
     <div class="date-box">
       <p>Tu acceso estará vigente hasta:<br/><strong>${escHtml(date)}</strong></p>
     </div>
