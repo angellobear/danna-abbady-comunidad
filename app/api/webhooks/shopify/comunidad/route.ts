@@ -141,8 +141,11 @@ export async function POST(req: NextRequest) {
   }
 
   // ── 9. DB: upsert miembro + pago ─────────────────────────────────
-  // Se consulta ANTES del upsert, que es justo lo que crea la fila.
-  const isRenewal = await memberExists(email);
+  // Renovacion si ya estaba en Circle o en la BD. Solo se salta el correo
+  // cuando es nuevo en ambos. memberExists va ANTES del upsert, que es
+  // justo lo que crea la fila.
+  const inDb = await memberExists(email);
+  const isRenewal = !circleMember.created || inDb;
   let expiresAt: Date;
   try {
     expiresAt = await upsertMemberPayment({
@@ -155,7 +158,7 @@ export async function POST(req: NextRequest) {
       shopifyCustomerId,
       shopifySellingPlanId,
     });
-    log('9/10 db upsert ok', { expiresAt, periodEnd, isRenewal });
+    log('9/10 db upsert ok', { expiresAt, periodEnd, isRenewal, inCircle: !circleMember.created, inDb });
   } catch (err) {
     log('db upsert FAILED', { error: serr(err) });
     return fail('db_upsert');
@@ -168,7 +171,7 @@ export async function POST(req: NextRequest) {
   // Solo a quienes ya existían en Circle: al miembro nuevo lo recibe el
   // onboarding de Circle, este correo dice "se renovó" y no aplica.
   if (!isRenewal) {
-    log('10/10 email skipped — miembro nuevo, no es renovacion', { to: email });
+    log('10/10 email skipped — nuevo en Circle y en la BD', { to: email });
   } else {
     try {
       log('10/10 sending email...', { to: email, from: emailFrom() });
