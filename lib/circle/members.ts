@@ -43,9 +43,15 @@ export async function createMember(email: string, name?: string): Promise<Circle
   }
 }
 
-/** Idempotente: retorna el existente o crea uno nuevo. */
-export async function findOrCreateMember(email: string, name?: string): Promise<CircleMember> {
-  return (await findMemberByEmail(email)) ?? createMember(email, name);
+/** Idempotente: retorna el existente o crea uno nuevo. `created` = primera vez en Circle. */
+export async function findOrCreateMember(
+  email: string,
+  name?: string,
+): Promise<CircleMember & { created: boolean }> {
+  const existing = await findMemberByEmail(email);
+  if (existing) return { ...existing, created: false };
+  // ponytail: el retry por 422 en createMember reporta created:true aunque fuera race condition
+  return { ...(await createMember(email, name)), created: true };
 }
 
 export async function updateMember(

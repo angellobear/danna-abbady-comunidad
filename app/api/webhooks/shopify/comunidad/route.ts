@@ -95,10 +95,10 @@ export async function POST(req: NextRequest) {
   };
 
   // ── 7. Circle: crear miembro ──────────────────────────────────────
-  let circleMember: { id: number };
+  let circleMember: { id: number; created: boolean };
   try {
     circleMember = await findOrCreateMember(email, name ?? undefined);
-    console.log('[webhook] circle member ready', { orderId, circleMemberId: circleMember.id });
+    console.log('[webhook] circle member ready', { orderId, circleMemberId: circleMember.id, created: circleMember.created });
   } catch (err) {
     console.error({ event: 'shopify.circle_member_failed', orderId, error: serr(err) });
     return fail('circle_member');
@@ -134,10 +134,15 @@ export async function POST(req: NextRequest) {
   await markAttemptCompleted(orderId);
   console.log({ event: 'shopify.processed', orderId, email, circleMemberId: circleMember.id });
 
-  // ── 10. Non-blocking: email + subscription contract + premium ───
-  sendSubscriptionConfirmation(email, name ?? null, periodEnd).catch((err) =>
-    console.error({ event: 'shopify.email_failed', orderId, error: serr(err) }),
-  );
+  // ── 10. Email de renovación: solo si ya existía en Circle ───────
+  if (!circleMember.created) {
+    try {
+      await sendSubscriptionConfirmation(email, name ?? null, periodEnd);
+      console.log('[webhook] renewal email sent', { orderId, email });
+    } catch (err) {
+      console.error({ event: 'shopify.email_failed', orderId, error: serr(err) });
+    }
+  }
 
   if (shopifyCustomerId) {
     findSubscriptionContractId(shopifyCustomerId)

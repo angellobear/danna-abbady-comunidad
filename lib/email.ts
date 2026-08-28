@@ -31,11 +31,11 @@ function subscriptionHtml(name: string, periodEnd: Date) {
   <div class="header"><h1>Comunidad Bendecidas</h1></div>
   <div class="body">
     <p>¡Hola, ${escHtml(firstName)}! 🌸</p>
-    <p>Tu membresía en la <strong>Comunidad Bendecidas</strong> está activa. Gracias por ser parte de este espacio tan especial.</p>
+    <p>Tu membresía en la <strong>Comunidad Bendecidas</strong> se renovó. Gracias por seguir siendo parte de este espacio tan especial.</p>
     <div class="date-box">
       <p>Tu acceso estará vigente hasta:<br/><strong>${escHtml(date)}</strong></p>
     </div>
-    <p>Ya puedes ingresar a la comunidad y disfrutar de todo el contenido que Danna tiene preparado para ti.</p>
+    <p>Puedes seguir ingresando a la comunidad y disfrutar de todo el contenido que Danna tiene preparado para ti.</p>
     <a class="btn" href="${CIRCLE_LOGIN}">Entrar a la comunidad →</a>
   </div>
   <div class="footer">
@@ -59,7 +59,7 @@ export async function sendSubscriptionConfirmation(
   await new Resend(key).emails.send({
     from: FROM,
     to: email,
-    subject: '¡Tu membresía está activa! 🌸',
+    subject: '¡Tu membresía se renovó! 🌸',
     html: subscriptionHtml(displayName, periodEnd),
   });
 }
