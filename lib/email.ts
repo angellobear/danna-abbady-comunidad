@@ -54,7 +54,7 @@ export async function sendSubscriptionConfirmation(
   email: string,
   name: string | null,
   periodEnd: Date,
-): Promise<void> {
+): Promise<string | undefined> {
   const key = process.env.RESEND_API_KEY;
   if (!key) throw new Error('RESEND_API_KEY not set');
   const displayName = name ?? email.split('@')[0];
@@ -67,4 +67,5 @@ export async function sendSubscriptionConfirmation(
   });
   if (error) throw new Error(`resend: ${error.name} — ${error.message}`);
   console.log('[email] renewal sent', { to: email, id: data?.id, from: from() });
+  return data?.id;
 }
