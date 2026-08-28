@@ -1,7 +1,9 @@
 import { Resend } from 'resend';
 
 const CIRCLE_LOGIN = 'https://login.circle.so/sign_in?request_host=bendecidas.circle.so';
-const FROM = process.env.RESEND_FROM ?? 'Danna Abbady <hola@manifestadorapersonal.com>';
+// .env.local usa EMAIL_FROM; RESEND_FROM se mantiene por compatibilidad
+export const from = () =>
+  process.env.EMAIL_FROM ?? process.env.RESEND_FROM ?? 'Danna Abbady <hola@manifestadorapersonal.com>';
 
 function subscriptionHtml(name: string, periodEnd: Date) {
   const date = periodEnd.toLocaleDateString('es-MX', {
@@ -54,12 +56,15 @@ export async function sendSubscriptionConfirmation(
   periodEnd: Date,
 ): Promise<void> {
   const key = process.env.RESEND_API_KEY;
-  if (!key) return;
+  if (!key) throw new Error('RESEND_API_KEY not set');
   const displayName = name ?? email.split('@')[0];
-  await new Resend(key).emails.send({
-    from: FROM,
+  // el SDK de Resend NO lanza en errores de API: devuelve { data, error }
+  const { data, error } = await new Resend(key).emails.send({
+    from: from(),
     to: email,
     subject: '¡Tu membresía se renovó! 🌸',
     html: subscriptionHtml(displayName, periodEnd),
   });
+  if (error) throw new Error(`resend: ${error.name} — ${error.message}`);
+  console.log('[email] renewal sent', { to: email, id: data?.id, from: from() });
 }

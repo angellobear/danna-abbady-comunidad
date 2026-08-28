@@ -3,6 +3,9 @@ import { isAxiosError } from 'axios';
 import { circleRequest, communityId, isCircleStatus } from '@/lib/circle/_client';
 import { adminClient } from '@/lib/supabase';
 import { Resend } from 'resend';
+import { from } from '@/lib/email';
+
+const TEST_TO = 'angello@blubear.io';
 
 const disabled = () =>
   NextResponse.json({ error: 'Debug endpoint disabled. Set DEBUG_HEALTH=true to enable.' }, { status: 403 });
@@ -34,13 +37,36 @@ async function checkCircle() {
 
 async function checkEmail() {
   const key = process.env.RESEND_API_KEY;
-  if (!key) return { ok: false, error: 'RESEND_API_KEY not set' };
+  const sender = from();
+  if (!key) {
+    console.error({ event: 'health.email_failed', error: 'RESEND_API_KEY not set' });
+    return { ok: false, from: sender, error: 'RESEND_API_KEY not set' };
+  }
+  const resend = new Resend(key);
   try {
-    const { data, error } = await new Resend(key).domains.list();
-    if (error) return { ok: false, error: error.message };
-    return { ok: true, domains: data?.data?.map((d: { name: string }) => d.name) ?? [] };
+    const { data: domains, error: domErr } = await resend.domains.list();
+    if (domErr) throw new Error(`domains.list: ${domErr.name} — ${domErr.message}`);
+
+    // envío real de prueba: valida el remitente, no solo las credenciales
+    const { data: sent, error: sendErr } = await resend.emails.send({
+      from: sender,
+      to: TEST_TO,
+      subject: 'Health check — comunidad Danna Abbady',
+      text: `Envío de prueba desde /api/debug/health. Remitente: ${sender}`,
+    });
+    if (sendErr) throw new Error(`emails.send: ${sendErr.name} — ${sendErr.message}`);
+
+    console.log('[health] test email sent', { to: TEST_TO, id: sent?.id, from: sender });
+    return {
+      ok: true,
+      from: sender,
+      domains: domains?.data?.map((d: { name: string }) => d.name) ?? [],
+      testEmail: { to: TEST_TO, id: sent?.id ?? null },
+    };
   } catch (err: unknown) {
-    return { ok: false, error: String(err) };
+    const error = err instanceof Error ? err.message : String(err);
+    console.error({ event: 'health.email_failed', from: sender, to: TEST_TO, error });
+    return { ok: false, from: sender, testEmail: { to: TEST_TO }, error };
   }
 }
 
