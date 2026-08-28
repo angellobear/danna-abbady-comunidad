@@ -9,15 +9,28 @@ function unwrapMember(data: CreateMemberResponse): CircleMember {
   return 'community_member' in data ? data.community_member : data;
 }
 
+type SearchResponse = CircleMember | CircleMember[] | { community_members: CircleMember[] };
+
+/**
+ * v2 responde UN objeto; las otras formas se toleran por si cambia.
+ * Vive aparte para poder probarla sin llamar a Circle: cuando se equivoca
+ * devuelve null en silencio y todo el mundo parece un miembro nuevo.
+ */
+export function pickMember(data: SearchResponse | null): CircleMember | null {
+  if (!data) return null;
+  if (Array.isArray(data)) return data[0] ?? null;
+  if ('community_members' in data) return data.community_members[0] ?? null;
+  return data.id ? data : null;
+}
+
 export async function findMemberByEmail(email: string): Promise<CircleMember | null> {
   const params = new URLSearchParams({ email, community_id: String(communityId()) });
   try {
-    const data = await circleRequest<CircleMember[] | { community_members: CircleMember[] }>(
+    const data = await circleRequest<SearchResponse>(
       'GET',
       `/community_members/search?${params}`,
     );
-    const list = Array.isArray(data) ? data : (data.community_members ?? []);
-    return list[0] ?? null;
+    return pickMember(data);
   } catch (err) {
     // 404 = no encontrado (Circle lo trata como error, no como lista vacía)
     if (isCircleStatus(err, 404)) return null;
