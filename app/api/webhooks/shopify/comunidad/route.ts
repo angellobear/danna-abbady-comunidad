@@ -134,14 +134,14 @@ export async function POST(req: NextRequest) {
   await markAttemptCompleted(orderId);
   console.log({ event: 'shopify.processed', orderId, email, circleMemberId: circleMember.id });
 
-  // ── 10. Email de renovación: solo si ya existía en Circle ───────
-  if (!circleMember.created) {
-    try {
-      await sendSubscriptionConfirmation(email, name ?? null, periodEnd);
-      console.log('[webhook] renewal email sent', { orderId, email });
-    } catch (err) {
-      console.error({ event: 'shopify.email_failed', orderId, error: serr(err) });
-    }
+  // ── 10. Email de confirmación ────────────────────────────────────
+  // ponytail: se envía siempre por ahora; para volver a mandarlo solo en
+  // renovaciones, envolver en `if (!circleMember.created)`.
+  try {
+    await sendSubscriptionConfirmation(email, name ?? null, periodEnd);
+    console.log('[webhook] email sent', { orderId, email, created: circleMember.created });
+  } catch (err) {
+    console.error({ event: 'shopify.email_failed', orderId, error: serr(err) });
   }
 
   if (shopifyCustomerId) {
