@@ -10,7 +10,7 @@ import {
   extractSellingPlanId,
   isSubscriptionOrder,
 } from '@/lib/schemas/shopify-subscription';
-import { upsertMemberPayment, getMemberStreak, logWebhookPayload, saveSubscriptionContractId } from '@/lib/db/members';
+import { upsertMemberPayment, getMemberStreak, logWebhookPayload, saveSubscriptionContractId, memberExists } from '@/lib/db/members';
 import { findSubscriptionContractId } from '@/lib/shopify';
 import { isDuplicateAttempt, createAttempt, markAttemptCompleted, markAttemptFailed } from '@/lib/db/webhook-attempts';
 import { membershipDurationMs, premiumStreakThreshold } from '@/lib/config';
@@ -141,6 +141,8 @@ export async function POST(req: NextRequest) {
   }
 
   // ── 9. DB: upsert miembro + pago ─────────────────────────────────
+  // Se consulta ANTES del upsert, que es justo lo que crea la fila.
+  const isRenewal = await memberExists(email);
   let expiresAt: Date;
   try {
     expiresAt = await upsertMemberPayment({
@@ -153,7 +155,7 @@ export async function POST(req: NextRequest) {
       shopifyCustomerId,
       shopifySellingPlanId,
     });
-    log('9/10 db upsert ok', { expiresAt, periodEnd });
+    log('9/10 db upsert ok', { expiresAt, periodEnd, isRenewal });
   } catch (err) {
     log('db upsert FAILED', { error: serr(err) });
     return fail('db_upsert');
@@ -165,7 +167,7 @@ export async function POST(req: NextRequest) {
   // ── 10. Email de renovación ──────────────────────────────────────
   // Solo a quienes ya existían en Circle: al miembro nuevo lo recibe el
   // onboarding de Circle, este correo dice "se renovó" y no aplica.
-  if (circleMember.created) {
+  if (!isRenewal) {
     log('10/10 email skipped — miembro nuevo, no es renovacion', { to: email });
   } else {
     try {

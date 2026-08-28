@@ -37,6 +37,21 @@ export async function setMemberInactive(email: string): Promise<void> {
   if (error) throw error;
 }
 
+/**
+ * ¿Ya existía este miembro antes del pago actual? Es la señal de renovación:
+ * Circle puede reportar `created` en alguien que ya era miembro y fue borrado
+ * de la comunidad, así que ese flag no sirve para decidirlo.
+ */
+export async function memberExists(email: string): Promise<boolean> {
+  const { data, error } = await adminClient()
+    .from('members')
+    .select('email')
+    .eq('email', email)
+    .maybeSingle();
+  if (error) throw error;
+  return data !== null;
+}
+
 /** Racha de meses consecutivos de membresía activa. */
 export async function getMemberStreak(email: string): Promise<number> {
   const { data, error } = await adminClient().rpc('get_member_streak', { p_email: email });
