@@ -67,8 +67,14 @@ export async function POST(req: NextRequest) {
   const order = parsed.data;
   const orderId = String(order.id);
 
-  // Log raw payload (non-blocking — best-effort audit trail)
-  logWebhookPayload(orderId, raw).catch(() => {});
+  // Audit trail. Awaited: sin await la funcion se congela al return y el
+  // insert se pierde de forma aleatoria. Cuesta ~200ms y nunca tumba el
+  // webhook: un fallo aqui solo se loguea.
+  try {
+    await logWebhookPayload(orderId, raw);
+  } catch (err) {
+    log('payload log FAILED', { error: serr(err) });
+  }
 
   // ── 3. Filtro por product_id ──────────────────────────────────────
   const requiredProductId = process.env.SHOPIFY_SUBSCRIPTION_PRODUCT_ID;
