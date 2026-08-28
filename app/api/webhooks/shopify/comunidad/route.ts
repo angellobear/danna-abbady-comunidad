@@ -135,8 +135,9 @@ export async function POST(req: NextRequest) {
   }
 
   // ── 9. DB: upsert miembro + pago ─────────────────────────────────
+  let expiresAt: Date;
   try {
-    await upsertMemberPayment({
+    expiresAt = await upsertMemberPayment({
       email,
       name: name ?? null,
       circleId: circleMember.id,
@@ -146,7 +147,7 @@ export async function POST(req: NextRequest) {
       shopifyCustomerId,
       shopifySellingPlanId,
     });
-    log('9/10 db upsert ok');
+    log('9/10 db upsert ok', { expiresAt, periodEnd });
   } catch (err) {
     log('db upsert FAILED', { error: serr(err) });
     return fail('db_upsert');
@@ -163,7 +164,7 @@ export async function POST(req: NextRequest) {
   } else {
     try {
       log('10/10 sending email...', { to: email, from: emailFrom() });
-      const id = await sendSubscriptionConfirmation(email, name ?? null, periodEnd);
+      const id = await sendSubscriptionConfirmation(email, name ?? null, expiresAt);
       log('10/10 EMAIL SENT', { to: email, resendId: id });
     } catch (err) {
       log('10/10 EMAIL FAILED', { to: email, from: emailFrom(), error: serr(err) });

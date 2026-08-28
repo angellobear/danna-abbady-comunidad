@@ -44,7 +44,11 @@ export async function getMemberStreak(email: string): Promise<number> {
   return (data as number) ?? 0;
 }
 
-/** Upsert atómico de miembro + pago. Usa advisory lock en la DB. */
+/**
+ * Upsert atómico de miembro + pago. Usa advisory lock en la DB.
+ * Devuelve el expires_at acumulado — no es paidAt + duración cuando el
+ * miembro ya tenía días vigentes.
+ */
 export async function upsertMemberPayment(params: {
   email: string;
   name: string | null;
@@ -54,8 +58,8 @@ export async function upsertMemberPayment(params: {
   periodEnd: Date;
   shopifyCustomerId?: string | null;
   shopifySellingPlanId?: string | null;
-}): Promise<void> {
-  const { error } = await adminClient().rpc('upsert_member_payment', {
+}): Promise<Date> {
+  const { data, error } = await adminClient().rpc('upsert_member_payment', {
     p_email:                  params.email,
     p_name:                   params.name,
     p_circle_id:              params.circleId,
@@ -66,6 +70,7 @@ export async function upsertMemberPayment(params: {
     p_shopify_selling_plan:   params.shopifySellingPlanId ?? null,
   });
   if (error) throw error;
+  return data ? new Date(data as string) : params.periodEnd;
 }
 
 export async function logWebhookPayload(orderId: string, payload: unknown): Promise<void> {
