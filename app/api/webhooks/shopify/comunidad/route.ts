@@ -10,8 +10,7 @@ import {
   extractSellingPlanId,
   isSubscriptionOrder,
 } from '@/lib/schemas/shopify-subscription';
-import { upsertMemberPayment, getMemberStreak, logWebhook, saveSubscriptionContractId, memberExists, type WebhookStep } from '@/lib/db/members';
-import { findSubscriptionContractId } from '@/lib/shopify';
+import { upsertMemberPayment, getMemberStreak, logWebhook, memberExists, type WebhookStep } from '@/lib/db/members';
 import { isDuplicateAttempt, createAttempt, markAttemptCompleted, markAttemptFailed } from '@/lib/db/webhook-attempts';
 import { membershipDurationMs, premiumStreakThreshold } from '@/lib/config';
 import { sendSubscriptionConfirmation, from as emailFrom } from '@/lib/email';
@@ -229,37 +228,17 @@ async function handle(req: NextRequest, log: Log, ctx: Ctx): Promise<NextRespons
 
   // ponytail: awaited a proposito — en serverless la funcion se congela al
   // hacer return y las promesas sueltas nunca corren.
-  if (!shopifyCustomerId) {
-    // La membresia queda completa igual; lo unico que falta es el contract_id
-    // para poder cancelar la suscripcion en Shopify mas adelante.
-    log('11 contract.skip — el pedido no trae customer.id', { orderId });
-  } else {
-    try {
-      const contractId = await findSubscriptionContractId(shopifyCustomerId);
-      if (contractId) await saveSubscriptionContractId(orderId, contractId);
-      log('11 contract.lookup', {
-        contractId,
-        shopifyCustomerId,
-        // findSubscriptionContractId devuelve null si faltan estas env vars,
-        // igual que si el cliente no tuviera contrato. Se distinguen aqui.
-        shopifyApiConfigured: Boolean(process.env.SHOPIFY_STORE_DOMAIN && process.env.SHOPIFY_ADMIN_TOKEN),
-      });
-    } catch (err) {
-      log('11 contract.lookup FAILED', { error: serr(err) });
-    }
-  }
-
   if (process.env.CIRCLE_PREMIUM_GROUP_ID) {
     try {
       const streak = await getMemberStreak(email);
       const promote = streak >= premiumStreakThreshold();
       if (promote) await addToPremiumGroup(email);
-      log('12 premium.check', { streak, threshold: premiumStreakThreshold(), promote });
+      log('11 premium.check', { streak, threshold: premiumStreakThreshold(), promote });
     } catch (err) {
-      log('12 premium.check FAILED', { error: serr(err) });
+      log('11 premium.check FAILED', { error: serr(err) });
     }
   }
 
-  log('13 done ok');
+  log('12 done ok');
   return NextResponse.json({ ok: true, orderId });
 }

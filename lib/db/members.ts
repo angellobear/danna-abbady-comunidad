@@ -109,13 +109,3 @@ export async function logWebhook(row: {
   if (error) throw error;
 }
 
-export async function saveSubscriptionContractId(
-  orderId: string,
-  contractId: string,
-): Promise<void> {
-  const { error } = await adminClient()
-    .from('subscription_payments')
-    .update({ shopify_subscription_contract_id: contractId })
-    .eq('shopify_order_id', orderId);
-  if (error) throw error;
-}
