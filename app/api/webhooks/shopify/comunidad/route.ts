@@ -1,6 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { findOrCreateMember } from '@/lib/circle/members';
+import { findMemberByEmail, createMember } from '@/lib/circle/members';
 import { addToSubscriptionGroup, addToPremiumGroup } from '@/lib/circle/access-groups';
 import {
   shopifySubscriptionSchema,
@@ -10,7 +10,7 @@ import {
   extractSellingPlanId,
   isSubscriptionOrder,
 } from '@/lib/schemas/shopify-subscription';
-import { upsertMemberPayment, getMemberStreak, logWebhookPayload, saveSubscriptionContractId, memberExists } from '@/lib/db/members';
+import { upsertMemberPayment, getMemberStreak, logWebhook, saveSubscriptionContractId, memberExists, type WebhookStep } from '@/lib/db/members';
 import { findSubscriptionContractId } from '@/lib/shopify';
 import { isDuplicateAttempt, createAttempt, markAttemptCompleted, markAttemptFailed } from '@/lib/db/webhook-attempts';
 import { membershipDurationMs, premiumStreakThreshold } from '@/lib/config';
@@ -22,13 +22,46 @@ export async function GET() {
   return NextResponse.json({ ok: true });
 }
 
+type Log = (step: string, extra?: Record<string, unknown>) => void;
+type Ctx = { orderId: string | null; matched: boolean; payload: unknown };
+
 export async function POST(req: NextRequest) {
   // ponytail: un solo prefijo `[wh <rid>]` para filtrar toda la traza en Vercel
   const rid = Math.random().toString(36).slice(2, 8);
   const t0 = Date.now();
-  const log = (step: string, extra?: Record<string, unknown>) =>
+  const steps: WebhookStep[] = [];
+  const ctx: Ctx = { orderId: null, matched: false, payload: null };
+  const log: Log = (step, extra) => {
     console.log(`[wh ${rid}] ${step}`, { ms: Date.now() - t0, ...extra });
+    steps.push({ ms: Date.now() - t0, step, data: extra ?? null });
+  };
 
+  try {
+    return await handle(req, log, ctx);
+  } finally {
+    // after() corre DESPUES de enviar la respuesta y mantiene viva la funcion
+    // serverless: los logs no suman latencia ni pueden tumbar el webhook.
+    // El finally cubre los ~12 returns tempranos. Solo se persiste lo que
+    // hizo match con el producto.
+    if (ctx.matched) {
+      after(async () => {
+        try {
+          await logWebhook({
+            orderId: String(ctx.orderId),
+            rid,
+            ms: Date.now() - t0,
+            payload: ctx.payload,
+            steps,
+          });
+        } catch (err) {
+          console.log(`[wh ${rid}] webhook log FAILED`, serr(err));
+        }
+      });
+    }
+  }
+}
+
+async function handle(req: NextRequest, log: Log, ctx: Ctx): Promise<NextResponse> {
   // ── 1. HMAC verify ────────────────────────────────────────────────
   const rawBody = await req.text();
   log('IN', { bytes: rawBody.length, topic: req.headers.get('x-shopify-topic') });
@@ -49,7 +82,7 @@ export async function POST(req: NextRequest) {
     log('ABORT hmac compare threw');
     return NextResponse.json({ ok: false }, { status: 401 });
   }
-  log('1/10 hmac ok');
+  log('1 hmac.ok');
 
   // ── 2. Parse + validate ───────────────────────────────────────────
   let raw: unknown;
@@ -66,41 +99,35 @@ export async function POST(req: NextRequest) {
 
   const order = parsed.data;
   const orderId = String(order.id);
-
-  // Audit trail. Awaited: sin await la funcion se congela al return y el
-  // insert se pierde de forma aleatoria. Cuesta ~200ms y nunca tumba el
-  // webhook: un fallo aqui solo se loguea.
-  try {
-    await logWebhookPayload(orderId, raw);
-  } catch (err) {
-    log('payload log FAILED', { error: serr(err) });
-  }
+  ctx.orderId = orderId;
 
   // ── 3. Filtro por product_id ──────────────────────────────────────
   const requiredProductId = process.env.SHOPIFY_SUBSCRIPTION_PRODUCT_ID;
-  log('2/10 parsed', { orderId });
+  log('2 parse.ok', { orderId, lineItems: order.line_items.map((li) => li.product_id) });
   if (requiredProductId && !order.line_items.some((li) => String(li.product_id) === requiredProductId)) {
-    log('SKIP product_mismatch', { requiredProductId, got: order.line_items.map((li) => li.product_id) });
+    log('3 product.mismatch — SKIP', { requiredProductId, got: order.line_items.map((li) => li.product_id) });
     return NextResponse.json({ ok: true, skipped: 'product_mismatch' });
   }
-  log('3/10 product ok');
+  ctx.matched = true;
+  ctx.payload = raw; // se guarda en el after() del POST, fuera del camino critico
+  log('3 product.match ok', { requiredProductId: requiredProductId || '(todos)' });
 
   // ── 4. Dedup ──────────────────────────────────────────────────────
   if (await isDuplicateAttempt(orderId)) {
-    log('SKIP duplicate — ya procesado, no se reenvia email', { orderId });
+    log('4 dedup.duplicate — SKIP, ya procesado, no se reenvia email', { orderId });
     return NextResponse.json({ ok: true, duplicate: true });
   }
-  log('4/10 not duplicate');
+  log('4 dedup.new');
 
   // ── 5. Email + validar suscripción ───────────────────────────────
   const email = extractBuyerEmail(order);
   if (!email) {
-    log('SKIP no_email');
+    log('5 buyer.no_email — SKIP');
     return NextResponse.json({ ok: true, skipped: 'no_email' });
   }
   const isSubscription = requiredProductId ? true : isSubscriptionOrder(order);
   if (!isSubscription) {
-    log('SKIP not_subscription');
+    log('5 buyer.not_subscription — SKIP');
     return NextResponse.json({ ok: true, skipped: 'not_subscription' });
   }
 
@@ -109,11 +136,11 @@ export async function POST(req: NextRequest) {
   const shopifySellingPlanId = extractSellingPlanId(order);
   const paidAt = new Date();
   const periodEnd = new Date(paidAt.getTime() + membershipDurationMs());
-  log('5/10 buyer ok', { email, name, shopifyCustomerId, periodEnd });
+  log('5 buyer.ok', { email, name, shopifyCustomerId, periodEnd });
 
   // ── 6. Registrar intento ──────────────────────────────────────────
   await createAttempt(orderId);
-  log('6/10 attempt created');
+  log('6 attempt.created');
 
   const fail = async (error: string) => {
     log('FAIL 500 — Shopify reintentara', { reason: error });
@@ -121,22 +148,40 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false }, { status: 500 });
   };
 
-  // ── 7. Circle: crear miembro ──────────────────────────────────────
+  // ── 7. Circle: buscar → crear ─────────────────────────────────────
+  // ponytail: findOrCreateMember va inline para poder loguear la busqueda y
+  // la creacion por separado. Los demas callers siguen usando el helper.
   let circleMember: { id: number; created: boolean };
   try {
-    circleMember = await findOrCreateMember(email, name ?? undefined);
-    log('7/10 circle member ok', { circleMemberId: circleMember.id, created: circleMember.created });
+    const existing = await findMemberByEmail(email);
+    log('7a circle.search', { email, found: !!existing, circleMemberId: existing?.id ?? null });
+    if (existing) {
+      circleMember = { id: existing.id, created: false };
+      log('7b circle.reuse — ya estaba en Circle, no se crea ni se reinvita', {
+        circleMemberId: existing.id, circleName: existing.name,
+      });
+    } else {
+      // Circle manda su propia invitacion al crear el miembro (no pasamos
+      // skip_invitation). La API no confirma el envio en la respuesta.
+      const created = await createMember(email, name ?? undefined);
+      circleMember = { id: created.id, created: true };
+      log('7b circle.create — miembro NUEVO creado, Circle dispara su invitacion', {
+        circleMemberId: created.id, circleName: created.name,
+      });
+    }
   } catch (err) {
-    log('circle member FAILED', { error: serr(err) });
+    log('7 circle.member FAILED', { error: serr(err) });
     return fail('circle_member');
   }
 
   // ── 8. Circle: agregar al grupo de suscripción ───────────────────
   try {
     await addToSubscriptionGroup(email);
-    log('8/10 subscription group ok');
+    log('8 circle.group.add ok — acceso a la comunidad', {
+      email, groupId: process.env.CIRCLE_ACCESS_GROUP_ID,
+    });
   } catch (err) {
-    log('circle group FAILED', { error: serr(err) });
+    log('8 circle.group.add FAILED', { error: serr(err) });
     return fail('circle_group');
   }
 
@@ -158,27 +203,27 @@ export async function POST(req: NextRequest) {
       shopifyCustomerId,
       shopifySellingPlanId,
     });
-    log('9/10 db upsert ok', { expiresAt, periodEnd, isRenewal, inCircle: !circleMember.created, inDb });
+    log('9 db.upsert ok', { expiresAt, periodEnd, isRenewal, inCircle: !circleMember.created, inDb });
   } catch (err) {
-    log('db upsert FAILED', { error: serr(err) });
+    log('9 db.upsert FAILED', { error: serr(err) });
     return fail('db_upsert');
   }
 
   await markAttemptCompleted(orderId);
-  log('attempt completed');
+  log('9b attempt.completed');
 
   // ── 10. Email de renovación ──────────────────────────────────────
   // Solo a quienes ya existían en Circle: al miembro nuevo lo recibe el
   // onboarding de Circle, este correo dice "se renovó" y no aplica.
   if (!isRenewal) {
-    log('10/10 email skipped — nuevo en Circle y en la BD', { to: email });
+    log('10 email.skip — nuevo en Circle y en la BD, lo da la bienvenida Circle', { to: email });
   } else {
     try {
-      log('10/10 sending email...', { to: email, from: emailFrom() });
+      log('10 email.sending', { to: email, from: emailFrom() });
       const id = await sendSubscriptionConfirmation(email, name ?? null, expiresAt);
-      log('10/10 EMAIL SENT', { to: email, resendId: id });
+      log('10 email.sent', { to: email, resendId: id });
     } catch (err) {
-      log('10/10 EMAIL FAILED', { to: email, from: emailFrom(), error: serr(err) });
+      log('10 email.FAILED', { to: email, from: emailFrom(), error: serr(err) });
     }
   }
 
@@ -188,9 +233,9 @@ export async function POST(req: NextRequest) {
     try {
       const contractId = await findSubscriptionContractId(shopifyCustomerId);
       if (contractId) await saveSubscriptionContractId(orderId, contractId);
-      log('contract lookup', { contractId });
+      log('11 contract.lookup', { contractId, shopifyCustomerId });
     } catch (err) {
-      log('contract lookup FAILED', { error: serr(err) });
+      log('11 contract.lookup FAILED', { error: serr(err) });
     }
   }
 
@@ -199,12 +244,12 @@ export async function POST(req: NextRequest) {
       const streak = await getMemberStreak(email);
       const promote = streak >= premiumStreakThreshold();
       if (promote) await addToPremiumGroup(email);
-      log('premium check', { streak, threshold: premiumStreakThreshold(), promote });
+      log('12 premium.check', { streak, threshold: premiumStreakThreshold(), promote });
     } catch (err) {
-      log('premium check FAILED', { error: serr(err) });
+      log('12 premium.check FAILED', { error: serr(err) });
     }
   }
 
-  log('DONE ok');
+  log('13 done ok');
   return NextResponse.json({ ok: true, orderId });
 }

@@ -88,8 +88,25 @@ export async function upsertMemberPayment(params: {
   return data ? new Date(data as string) : params.periodEnd;
 }
 
-export async function logWebhookPayload(orderId: string, payload: unknown): Promise<void> {
-  await adminClient().from('shopify_webhook_logs').insert({ shopify_order_id: orderId, payload });
+export type WebhookStep = { ms: number; step: string; data: unknown };
+
+/** Una fila por ejecucion del webhook: payload crudo + traza completa. */
+export async function logWebhook(row: {
+  orderId: string;
+  rid: string;
+  ms: number;
+  payload: unknown;
+  steps: WebhookStep[];
+}): Promise<void> {
+  // supabase-js no lanza: sin este check un insert fallido pasaba en silencio.
+  const { error } = await adminClient().from('shopify_webhook_logs').insert({
+    shopify_order_id: row.orderId,
+    rid: row.rid,
+    ms: row.ms,
+    payload: row.payload,
+    steps: row.steps,
+  });
+  if (error) throw error;
 }
 
 export async function saveSubscriptionContractId(
