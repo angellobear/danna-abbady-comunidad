@@ -229,11 +229,21 @@ async function handle(req: NextRequest, log: Log, ctx: Ctx): Promise<NextRespons
 
   // ponytail: awaited a proposito — en serverless la funcion se congela al
   // hacer return y las promesas sueltas nunca corren.
-  if (shopifyCustomerId) {
+  if (!shopifyCustomerId) {
+    // La membresia queda completa igual; lo unico que falta es el contract_id
+    // para poder cancelar la suscripcion en Shopify mas adelante.
+    log('11 contract.skip — el pedido no trae customer.id', { orderId });
+  } else {
     try {
       const contractId = await findSubscriptionContractId(shopifyCustomerId);
       if (contractId) await saveSubscriptionContractId(orderId, contractId);
-      log('11 contract.lookup', { contractId, shopifyCustomerId });
+      log('11 contract.lookup', {
+        contractId,
+        shopifyCustomerId,
+        // findSubscriptionContractId devuelve null si faltan estas env vars,
+        // igual que si el cliente no tuviera contrato. Se distinguen aqui.
+        shopifyApiConfigured: Boolean(process.env.SHOPIFY_STORE_DOMAIN && process.env.SHOPIFY_ADMIN_TOKEN),
+      });
     } catch (err) {
       log('11 contract.lookup FAILED', { error: serr(err) });
     }
